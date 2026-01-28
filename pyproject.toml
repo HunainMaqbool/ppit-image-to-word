@@ -1,0 +1,13 @@
+[project]
+name = "ppit"
+version = "0.1.0"
+description = "Basic Image-to-Word Converter (MVP) - OCR text extraction with formatting preservation"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pytesseract",
+    "pillow",
+    "opencv-python",
+    "python-docx",
+    "streamlit",
+]

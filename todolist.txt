@@ -1,0 +1,62 @@
+PHASE 0 – Project and Environment Setup
+- [ ] Ensure project structure: PRD.txt, README.md, main.py, imgs/ with sample images.
+- [ ] Confirm Python version (>= 3.13) and uv installation.
+- [ ] In project folder, run: uv sync.
+- [ ] Add core dependencies with uv:
+      - [ ] pytesseract
+      - [ ] Pillow
+      - [ ] opencv-python (optional, for preprocessing)
+      - [ ] python-docx
+
+PHASE 1 – Basic OCR Pipeline (Plain Text)
+- [ ] Implement function: image_path -> plain text string.
+- [ ] Load image from imgs/sample1.jpeg.
+- [ ] Apply simple preprocessing (grayscale, threshold) if needed.
+- [ ] Use pytesseract to extract text.
+- [ ] Save or print extracted text for manual inspection.
+- [ ] Test OCR on sample1.jpeg, sample2.jpeg, sample3.jpeg.
+
+PHASE 2 – Formatting Extraction (Bold, Italic, Alignment, Paragraphs)
+- [ ] Decide simple rules for:
+      - [ ] Paragraph detection (gaps / line grouping).
+      - [ ] Alignment detection (left/center/right based on x-position).
+      - [ ] Bold/italic detection (heuristic based on thickness/darkness or region).
+- [ ] Use pytesseract detailed output (e.g., image_to_data) for positions.
+- [ ] Implement function: ocr_output -> structured paragraphs with style flags.
+- [ ] Log structured output to console/file for checking against original images.
+
+PHASE 3 – DOCX Generation
+- [ ] Implement function: structured paragraphs -> .docx using python-docx.
+- [ ] Map:
+      - [ ] Paragraphs -> doc.add_paragraph().
+      - [ ] Bold/italic flags -> runs with bold/italic.
+      - [ ] Alignment flags -> paragraph.alignment.
+- [ ] Wire full pipeline: image_path -> output.docx.
+- [ ] Create an out/ folder (or similar) for generated .docx files.
+- [ ] Run end-to-end on all sample images and open .docx to verify.
+
+PHASE 4 – Simple GUI (MVP)
+- [ ] Choose GUI toolkit (Tkinter recommended for simplicity).
+- [ ] Create main window with:
+      - [ ] "Select Image" button (file picker for JPG/PNG).
+      - [ ] Label to show selected file path.
+      - [ ] "Convert to Word" button.
+      - [ ] Status/label for success or failure message.
+- [ ] On "Select Image": store chosen path.
+- [ ] On "Convert to Word": call full pipeline and save .docx.
+- [ ] Show clear success message with output path.
+- [ ] Handle basic errors (no file selected, invalid path, Tesseract not found).
+
+PHASE 5 – Polish, Testing, and Deliverables
+- [ ] Define output naming scheme (e.g., same name as image with .docx extension).
+- [ ] Manual test checklist:
+      - [ ] All sample images convert without crashing.
+      - [ ] Text is readable in all outputs.
+      - [ ] Bold/italic/alignment approximately match originals where possible.
+- [ ] Update README.md:
+      - [ ] How to install Tesseract on the OS.
+      - [ ] uv commands to install deps and run the app.
+      - [ ] Simple usage instructions with screenshots if time allows.
+- [ ] Draft short project report (architecture + screenshots).
+- [ ] Record demo video showing full workflow from image selection to .docx open.
+
