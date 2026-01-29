@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +8,14 @@ import pytesseract
 import streamlit as st
 from docx import Document
 from PIL import Image
+
+# Check if Tesseract is available
+try:
+    pytesseract.get_tesseract_version()
+except Exception:
+    st.error("⚠️ Tesseract OCR is not installed or not found in PATH.")
+    st.info("On Streamlit Cloud, Tesseract should be installed via packages.txt")
+    st.stop()
 
 
 def run_ocr(image_bytes):
