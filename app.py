@@ -1,7 +1,6 @@
 import io
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pytesseract
 import streamlit as st
@@ -11,21 +10,15 @@ from PIL import Image
 
 def run_ocr(image_bytes):
     pil_image = Image.open(io.BytesIO(image_bytes))
-    image_array = np.array(pil_image)
-    
-    if len(image_array.shape) == 3:
-        if image_array.shape[2] == 4:
-            image_array = cv2.cvtColor(image_array, cv2.COLOR_RGBA2BGR)
-        else:
-            image_array = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-        gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image_array
 
-    gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    gray = pil_image.convert("L")
 
-    pil_image = Image.fromarray(gray)
-    text = pytesseract.image_to_string(pil_image, lang="eng")
+    gray_np = np.array(gray)
+    threshold = gray_np.mean()
+    binary_np = (gray_np > threshold) * 255
+    binary = Image.fromarray(binary_np.astype("uint8"))
+
+    text = pytesseract.image_to_string(binary, lang="eng")
     return text
 
 
@@ -55,7 +48,7 @@ uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "p
 
 if uploaded_file is not None:
     image_bytes = uploaded_file.read()
-    st.image(image_bytes, caption="Uploaded Image", width='stretch')
+    st.image(image_bytes, caption="Uploaded Image", width="stretch")
 
     if st.button("Convert to Word Document", type="primary"):
         with st.spinner("Processing image with OCR..."):
@@ -79,7 +72,6 @@ if uploaded_file is not None:
                     st.warning("No text detected in the image. Please try a different image.")
             except Exception as e:
                 st.error(f"Error processing image: {str(e)}")
-                st.info("Make sure Tesseract OCR is installed on your system.")
-
+                st.info("Make sure Tesseract OCR is available in the environment.")
 else:
     st.info("👆 Please upload an image file to get started")
