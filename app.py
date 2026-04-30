@@ -1,86 +1,219 @@
+import hashlib
 import io
 from pathlib import Path
 
-import numpy as np
 import streamlit as st
-from docx import Document
-from PIL import Image
 
-# Import pytesseract with error handling
-try:
-    import pytesseract
-    pytesseract.get_tesseract_version()
-except Exception as e:
-    st.error("⚠️ Tesseract OCR is not available.")
-    st.error(f"Error: {str(e)}")
-    st.info("On Streamlit Cloud, ensure packages.txt contains 'tesseract-ocr'")
-    st.stop()
+from agents import analysis_agent, docx_agent, memory_agent, ocr_agent
+
+st.set_page_config(
+    page_title="DocAgent — Intelligent OCR",
+    page_icon="🤖",
+    layout="wide",
+)
+
+memory_agent.init_session_state()
 
 
-def run_ocr(image_bytes):
-    pil_image = Image.open(io.BytesIO(image_bytes))
+def _run_pipeline(image_bytes: bytes, image_name: str) -> dict:
+    prefs = memory_agent.load_preferences()
 
-    gray = pil_image.convert("L")
+    with st.status("🤖 Agent pipeline running…", expanded=True) as status:
 
-    gray_np = np.array(gray)
-    threshold = gray_np.mean()
-    binary_np = (gray_np > threshold) * 255
-    binary = Image.fromarray(binary_np.astype("uint8"))
+        # Agent 1: OCR
+        st.write("🔍 **OCR Agent** — preprocessing image and extracting text…")
+        try:
+            ocr_result = ocr_agent.run_enhanced_ocr(image_bytes, image_name)
+        except ocr_agent.OCRError as e:
+            status.update(label="❌ OCR failed", state="error")
+            return {"error": str(e)}
 
-    text = pytesseract.image_to_string(binary, lang="eng")
-    return text
+        engine = ocr_result.get("ocr_engine", "tesseract")
+        engine_label = "🔭 Groq Vision" if engine == "vision" else "🔤 Tesseract"
+        st.write(
+            f"   ✅ Extracted **{ocr_result['word_count']} words** "
+            f"with **{ocr_result['confidence']}% confidence** via {engine_label}"
+        )
+        if engine == "vision":
+            st.write("   ℹ️ _Tesseract confidence was low — Groq Vision used as fallback._")
+
+        if ocr_result["word_count"] == 0:
+            status.update(label="⚠️ No text found in image", state="error")
+            return {"error": "No text detected. Try a clearer scan.", "ocr": ocr_result}
+
+        # Agent 2: Analysis
+        st.write("🧠 **Analysis Agent** — reasoning about document structure…")
+        analysis_result = analysis_agent.analyze_document(ocr_result, prefs, [])
+
+        if analysis_result["status"] == "error":
+            st.write("   ⚠️ AI analysis failed — using raw OCR text as fallback.")
+            docx_buf = docx_agent.build_passthrough_docx(ocr_result["raw_text"])
+            status.update(label="✅ Done (raw OCR — AI unavailable)", state="complete")
+            return {"ocr": ocr_result, "analysis": None, "docx": docx_buf, "fallback": True}
+
+        block_count = len(analysis_result.get("blocks", []))
+        doc_type = analysis_result.get("document_type", "unknown")
+        conf = analysis_result.get("confidence_score", 0)
+        st.write(
+            f"   ✅ Detected **{doc_type}** document · "
+            f"**{block_count} blocks** · confidence **{conf:.0%}**"
+        )
+        st.write(f"   💬 _{analysis_result.get('reasoning', '')}_")
+
+        # Agent 3: DOCX
+        st.write("📝 **DOCX Agent** — generating formatted Word document…")
+        docx_buf = docx_agent.build_docx(analysis_result)
+        st.write("   ✅ Document ready for download.")
+
+        # Memory: log and save
+        memory_agent.log_agent_decision(analysis_result, image_name)
+        prefs["session_count"] = prefs.get("session_count", 0) + 1
+        memory_agent.save_preferences(prefs)
+
+        status.update(label="✅ Pipeline complete!", state="complete")
+
+    return {"ocr": ocr_result, "analysis": analysis_result, "docx": docx_buf, "fallback": False}
 
 
-def text_to_docx(text, output_path=None):
-    doc = Document()
-    paragraphs = text.split("\n")
-    for para_text in paragraphs:
-        if para_text.strip():
-            doc.add_paragraph(para_text.strip())
-        else:
-            doc.add_paragraph()
-    if output_path:
-        doc.save(output_path)
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("🤖 DocAgent")
+    st.caption("Agentic Image-to-Word System")
+    st.divider()
+
+    prefs = memory_agent.load_preferences()
+    st.markdown(f"**Sessions run:** {prefs.get('session_count', 0)}")
+    st.markdown(f"**Patterns learned:** {len(prefs.get('learned_patterns', []))}")
+
+    st.divider()
+    log_entries = memory_agent.load_log()
+    if log_entries:
+        with st.expander(f"📋 Agent Log ({len(log_entries)} runs)"):
+            for entry in reversed(log_entries[-5:]):
+                ts = entry.get("timestamp", "")[:16].replace("T", " ")
+                conf = entry.get("confidence_score", 0)
+                st.markdown(
+                    f"**{ts}**  \n"
+                    f"`{entry.get('document_type', '?')}` · "
+                    f"{conf:.0%} · {entry.get('block_count', 0)} blocks"
+                )
     else:
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        return buffer
+        st.caption("No runs yet.")
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+st.title("🤖 DocAgent — Intelligent Image-to-Word")
+st.markdown(
+    "Upload a scanned document image. "
+    "Three specialised agents will automatically extract, analyse, and format it into a Word document."
+)
 
-st.set_page_config(page_title="Image to Word Converter", page_icon="📄", layout="centered")
-
-st.title("📄 Image to Word Converter")
-st.markdown("Upload an image (JPG/PNG) to extract text and download as Word document (.docx)")
-
-uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader(
+    "Choose an image (JPG / PNG)",
+    type=["jpg", "jpeg", "png"],
+    label_visibility="visible",
+)
 
 if uploaded_file is not None:
     image_bytes = uploaded_file.read()
-    st.image(image_bytes, caption="Uploaded Image", width="stretch")
+    image_hash = hashlib.md5(image_bytes).hexdigest()
 
-    if st.button("Convert to Word Document", type="primary"):
-        with st.spinner("Processing image with OCR..."):
-            try:
-                text = run_ocr(image_bytes)
+    # Invalidate cached result when a new image is uploaded
+    if st.session_state.get("_last_hash") != image_hash:
+        st.session_state["_last_hash"] = image_hash
+        st.session_state["_pipeline_result"] = None
 
-                if text.strip():
-                    st.success("OCR completed successfully!")
-                    st.subheader("Extracted Text Preview:")
-                    st.text_area("", text, height=200, disabled=True)
+    col_img, col_out = st.columns([1, 2])
 
-                    docx_buffer = text_to_docx(text)
+    with col_img:
+        st.image(image_bytes, caption=uploaded_file.name, width="stretch")
 
-                    st.download_button(
-                        label="📥 Download Word Document (.docx)",
-                        data=docx_buffer,
-                        file_name=f"{Path(uploaded_file.name).stem}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    with col_out:
+        # Run pipeline automatically (once per image)
+        if st.session_state.get("_pipeline_result") is None:
+            result = _run_pipeline(image_bytes, uploaded_file.name)
+            st.session_state["_pipeline_result"] = result
+        else:
+            result = st.session_state["_pipeline_result"]
+
+        if "error" in result:
+            st.error(result["error"])
+        else:
+            ocr = result["ocr"]
+            analysis = result.get("analysis")
+            docx_buf: io.BytesIO = result["docx"]
+
+            # ── Results ───────────────────────────────────────────────────
+            st.markdown("---")
+
+            # Metrics row
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Words extracted", ocr["word_count"])
+            engine = ocr.get("ocr_engine", "tesseract")
+            m2.metric("OCR engine", "🔭 Vision" if engine == "vision" else "🔤 Tesseract",
+                      help=ocr.get("preprocessing_applied", ""))
+            if analysis:
+                m3.metric("Document type", analysis.get("document_type", "?"))
+                conf = analysis.get("confidence_score", 0)
+                badge = "🟢" if conf >= 0.85 else ("🟡" if conf >= 0.70 else "🔴")
+                m4.metric("AI confidence", f"{badge} {conf:.0%}")
+            else:
+                m3.metric("Mode", "Raw OCR")
+                m4.metric("AI", "bypassed")
+
+            # Download
+            stem = Path(uploaded_file.name).stem
+            suffix = "_raw" if result.get("fallback") else "_agent"
+            st.download_button(
+                label="📥 Download Word Document (.docx)",
+                data=docx_buf,
+                file_name=f"{stem}{suffix}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                type="primary",
+                use_container_width=True,
+            )
+
+            # Extracted text preview
+            with st.expander("📄 Extracted text preview"):
+                st.text(ocr["raw_text"])
+
+            # Block details
+            if analysis and analysis.get("blocks"):
+                with st.expander(f"🧠 AI formatting decisions ({len(analysis['blocks'])} blocks)"):
+                    for b in analysis["blocks"]:
+                        conf_icon = "🟢" if b["confidence"] >= 0.85 else ("🟡" if b["confidence"] >= 0.70 else "🔴")
+                        st.markdown(
+                            f"{conf_icon} **{b['block_type']}** "
+                            f"(align: {b['alignment']}, bold: {b['bold']}, italic: {b['italic']})  \n"
+                            f"> {b['text'][:100]}{'…' if len(b['text']) > 100 else ''}  \n"
+                            f"_↳ {b['reasoning']}_"
+                        )
+
+            if analysis and analysis.get("warnings"):
+                with st.expander("⚠️ Agent warnings"):
+                    for w in analysis["warnings"]:
+                        st.warning(str(w))
+
+            # Feedback
+            st.markdown("---")
+            st.caption("Was the output useful?")
+            fb_col1, fb_col2, _ = st.columns([1, 1, 4])
+            with fb_col1:
+                if st.button("👍 Yes"):
+                    p = memory_agent.load_preferences()
+                    p = memory_agent.add_feedback(
+                        p, "positive", "",
+                        analysis.get("document_type", "unknown") if analysis else "raw",
+                        analysis.get("confidence_score", 0) if analysis else 0,
                     )
-                else:
-                    st.warning("No text detected in the image. Please try a different image.")
-            except Exception as e:
-                st.error(f"Error processing image: {str(e)}")
-                st.info("Make sure Tesseract OCR is available in the environment.")
-else:
-    st.info("👆 Please upload an image file to get started")
+                    memory_agent.save_preferences(p)
+                    st.toast("Thanks for the feedback!")
+            with fb_col2:
+                if st.button("👎 No"):
+                    p = memory_agent.load_preferences()
+                    p = memory_agent.add_feedback(
+                        p, "negative", "",
+                        analysis.get("document_type", "unknown") if analysis else "raw",
+                        analysis.get("confidence_score", 0) if analysis else 0,
+                    )
+                    memory_agent.save_preferences(p)
+                    st.toast("Noted — will improve.")

@@ -5,9 +5,8 @@ description = "Basic Image-to-Word Converter (MVP) - OCR text extraction with fo
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pytesseract",
     "pillow",
     "python-docx",
     "streamlit",
-    "numpy",
+    "groq>=0.4.0",
 ]
